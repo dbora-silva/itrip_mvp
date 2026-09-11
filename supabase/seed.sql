@@ -1,0 +1,6 @@
+-- Seed data for local development.
+--
+-- Intentionally empty in this phase: domain tables (profiles, trips, tasks) and their
+-- seed data are introduced in a later migration/seed pass. This file exists so that
+-- `supabase db reset` (and `supabase start` on first run) succeed today, since
+-- `supabase/config.toml` already points `db.seed.sql_paths` at it.

@@ -1,0 +1,25 @@
+# This compose file runs ONLY the Next.js application. The Supabase stack (Postgres,
+# Auth, PostgREST, Studio, ...) is managed separately by the Supabase CLI
+# (`npm run supabase:start`), not recreated here. See docs/local-environment.md.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    env_file:
+      - path: .env.local
+        required: false
+    environment:
+      # Reaches the Supabase CLI's local API gateway on the host machine. Resolved via
+      # Docker Desktop's built-in DNS entry; extra_hosts below covers native Linux too.
+      SUPABASE_URL: http://host.docker.internal:54321
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 5

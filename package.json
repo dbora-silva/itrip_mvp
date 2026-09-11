@@ -18,7 +18,14 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:unit": "vitest run",
-    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build"
+    "validate": "npm run format:check && npm run lint && npm run typecheck && npm run test && npm run build",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:status": "supabase status",
+    "db:reset": "supabase db reset",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down"
   },
   "dependencies": {
     "@base-ui/react": "^1.8.0",
@@ -44,6 +51,7 @@
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^29.1.1",
     "prettier": "^3.9.6",
+    "supabase": "^2.117.0",
     "tailwindcss": "^4",
     "typescript": "^5.9.3",
     "vite": "^8.3.0",

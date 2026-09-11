@@ -1,3 +1,5 @@
+import { getServerSupabaseUrl, getSupabaseAnonKey } from "@/lib/supabase/env";
+
 // Never cache: readiness must reflect the current state of the Supabase stack, not a
 // snapshot from an earlier request.
 export const dynamic = "force-dynamic";
@@ -24,20 +26,23 @@ async function checkService(service: string, url: URL, apikey?: string): Promise
  * Readiness: confirms the app can reach the Supabase services it actually depends on —
  * Auth and PostgREST, both through the API gateway — not just that Kong itself answers.
  *
- * Gateway URL resolution mirrors the server-side Supabase client factory introduced in a
- * later phase: SUPABASE_URL (server-only, e.g. http://host.docker.internal:54321 when
- * running inside the app container) falls back to NEXT_PUBLIC_SUPABASE_URL.
+ * Gateway URL resolution uses the same lib/supabase/env.ts helpers as the real
+ * server-side Supabase client (lib/supabase/server.ts): SUPABASE_URL (server-only, e.g.
+ * http://host.docker.internal:54321 when running inside the app container) falls back
+ * to NEXT_PUBLIC_SUPABASE_URL.
  *
  * The public response is intentionally minimal (no URLs, keys, or upstream response
  * bodies) — per-service detail is only written to the server log. Domain tables
  * (profiles/trips/tasks) are not checked here; that belongs to a later phase.
  */
 export async function GET() {
-  const supabaseUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!supabaseUrl) {
-    console.error("[readiness] supabase_url_not_configured");
+  let supabaseUrl: string;
+  let anonKey: string;
+  try {
+    supabaseUrl = getServerSupabaseUrl();
+    anonKey = getSupabaseAnonKey();
+  } catch {
+    console.error("[readiness] supabase_env_not_configured");
     return Response.json({ status: "unavailable" }, { status: 503 });
   }
 

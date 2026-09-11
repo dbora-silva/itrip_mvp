@@ -8,8 +8,9 @@ describe("Home", () => {
     expect(screen.getByRole("heading", { level: 1, name: "iTrip" })).toBeInTheDocument();
   });
 
-  it("renders a disabled placeholder action", () => {
+  it("links to signup and login", () => {
     render(<Home />);
-    expect(screen.getByRole("button", { name: "Em breve" })).toBeDisabled();
+    expect(screen.getByRole("link", { name: "Criar conta" })).toHaveAttribute("href", "/cadastro");
+    expect(screen.getByRole("link", { name: "Entrar" })).toHaveAttribute("href", "/login");
   });
 });

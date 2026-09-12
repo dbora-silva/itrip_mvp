@@ -117,6 +117,11 @@ const SEED_USERS = [
         destination: "Buenos Aires, Argentina",
         start_date: relativeDate(-2),
         end_date: relativeDate(3),
+        itinerary:
+          "Dia 1: chegada e check-in no hotel em Palermo.\n" +
+          "Dia 2: passeio a pé pela San Telmo, feira de antiguidades.\n" +
+          "Dia 3: jantar de réveillon reservado no restaurante Don Julio.\n" +
+          "Dia 4: dia livre, possível bate-volta a Tigre.",
         tasks: [
           { title: "Reservar restaurante", status: "pending" },
           { title: "Comprar ingresso do show", status: "pending" },
@@ -245,6 +250,7 @@ async function replaceTripsForUser(ownerId, trips) {
         destination: trip.destination,
         start_date: trip.start_date,
         end_date: trip.end_date,
+        itinerary: trip.itinerary ?? null,
       })
       .select("id")
       .single();

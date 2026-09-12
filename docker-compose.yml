@@ -7,7 +7,10 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "3000:3000"
+      # Host:container. Container-internal port stays 3000 (what the app actually binds
+      # to, per Dockerfile/next.config) — only the host-side mapping changed, to make room
+      # for `npm run dev` to keep using 3000 locally without a conflict.
+      - "3002:3000"
     env_file:
       - path: .env.local
         required: false

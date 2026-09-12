@@ -208,30 +208,47 @@ session into `localStorage`, `sessionStorage`, or any other client-side store �
 (which only reads what's in the cookie without verifying it's still valid — not
 sufficient for an authorization decision). What is actually verified, from the
 installed `@supabase/auth-js` source
-(`node_modules/@supabase/auth-js/dist/module/GoTrueClient.js`, `getClaims()` JSDoc and
-implementation) and from a direct test against the local instance:
+(`node_modules/@supabase/auth-js/dist/module/GoTrueClient.js`, `getClaims()` JSDoc,
+`fetchJwk()`, and the `GLOBAL_JWKS` module-level cache) and from a direct test against
+the local instance:
 
 - **If the project signs JWTs with an asymmetric key** (ES256/RS256), `getClaims()`
-  verifies the signature locally against a cached JWKS (`/.well-known/jwks.json`,
-  fetched once and cached in-process) — no per-request network call once cached.
-- **If the project signs JWTs with the legacy symmetric secret (HS256)** — which is
-  what this project's local `supabase/config.toml` currently uses (`JWT_SECRET`, printed
-  by `supabase status`) — the installed source states plainly: _"it always sends a
-  request similar to `getUser()` to validate the JWT at the server."_ This was
-  confirmed empirically too: two consecutive `getClaims()` calls against the local
-  instance took 11ms and 1ms respectively — consistent with a fast local-network call,
-  not proof of offline verification, and the symmetric-signing code path in the
-  installed source shows there is no local-verification branch available for HS256 at
-  all.
+  verifies the signature locally via WebCrypto against a JWKS
+  (`/.well-known/jwks.json`), fetched once and cached in a **module-level** object
+  (`GLOBAL_JWKS`, keyed by the client's storage key) — not per client instance. This
+  matters here specifically because `lib/supabase/server.ts` and `lib/supabase/proxy.ts`
+  both create a **fresh Supabase client on every request** (an explicit `@supabase/ssr`
+  requirement); without the cache being module-scoped rather than instance-scoped, that
+  would defeat caching entirely. Because it's module-scoped, the cache is shared across
+  requests handled by the same server process for the cache's TTL.
+- **If the project signs JWTs with the legacy symmetric secret (HS256)**, the installed
+  source states plainly: _"it always sends a request similar to `getUser()` to validate
+  the JWT at the server"_ — no local-verification branch exists for that case at all.
+
+**Correction to an earlier draft of this document:** this project's local instance was
+previously (Phase 5) assumed to sign JWTs with the legacy symmetric secret, based on the
+`JWT_SECRET` value `supabase status` prints. That assumption was wrong, and is corrected
+here rather than left standing: decoding a real access token obtained via
+`signInWithPassword()` shows header `{"alg":"ES256","kid":"..."}` — this project's local
+Supabase CLI provisions an **asymmetric** signing key by default (no
+`signing_keys_path` is configured in `supabase/config.toml`; the `JWT_SECRET` shown by
+`supabase status` is a separate, legacy value still used only to sign the static
+`anon`/`service_role` API keys, which remain HS256 — confirmed by decoding those
+separately). Re-run empirically for this phase: four consecutive `getClaims()` calls
+against the same client measured 9.03ms, then 0.59ms, 0.45ms, 0.54ms — a >15x drop after
+the first call, consistent with a one-time JWKS fetch followed by local WebCrypto
+verification, not a per-call network round trip.
+
+**Current, verified consequence:** `proxy.ts` and `app/dashboard/layout.tsx` pay one
+network call the first time any client in the process calls `getClaims()` (JWKS fetch),
+and verify locally thereafter for the JWKS's TTL. This is the opposite of what the
+earlier draft claimed. If a future environment (hosted or reconfigured local) signs with
+the legacy symmetric secret instead, the code path above shows this would silently
+degrade to a `getUser()`-equivalent network call every time — worth re-verifying if the
+signing configuration ever changes, rather than assumed to still be asymmetric.
+
 - If the access token is close to expiring when `getClaims()` is called, the session is
   refreshed first (another network round trip) before the JWT is validated.
-
-**Consequence documented, not hidden:** with this project's current local (HS256)
-configuration, every `proxy.ts` invocation and every `app/dashboard/layout.tsx` render
-makes a real network call to the Auth server — there is no offline fast path today. If a
-hosted project is later configured with asymmetric signing keys, this becomes faster
-automatically (same code, no change needed) — but that has not been verified against a
-hosted project and is not claimed as current behavior.
 
 ### Redirect allowlist (`lib/auth/redirect.ts`)
 
@@ -315,3 +332,262 @@ extracts only a coarse category from it (the Supabase error's `code`, or a plain
 never form data, passwords, cookies, JWTs, or full Supabase response objects. There is no
 parameter through which a caller could pass any of those in, by construction — the
 function's only inputs are the operation name, the error, and an optional correlation id.
+
+## Trips CRUD (Phase 6)
+
+### Search is a SQL function, not a hand-built `.or()` filter
+
+`features/trips/queries.ts` calls the `search_trips(p_search, p_status)` RPC
+(`supabase/migrations/20260911212923_create_search_trips_function.sql`) instead of
+building a `postgrest-js` `.or()` filter string in application code. Two things were
+verified before choosing this, not assumed:
+
+- Reading `node_modules/@supabase/postgrest-js/src/PostgrestFilterBuilder.ts`'s `or()`
+  method: it does no escaping at all — the string passed in is used exactly as given,
+  only wrapped in an outer `()`. `.in()`/`.contains()` elsewhere in the same file _do_
+  escape (wrapping a value in double quotes when it contains `,`, `(`, or `)`), but
+  `.or()` has no equivalent.
+- PostgREST's own documentation describes no complete, official recipe for escaping
+  arbitrary user text inside `or=` — only that a filter _value_ with a reserved
+  character needs double-quoting, which doesn't cover the shape of a hand-built
+  `name.ilike.%x%,destination.ilike.%x%` string where the user-typed text could itself
+  contain `,`/`(`/`)`.
+
+This was never a data-exposure risk — RLS still governs every row regardless of how a
+malformed filter string parses — but a robustness one: a search term with those
+characters could produce a PostgREST syntax error surfaced to the user. `search_trips`
+avoids the question entirely: `p_search` is a normal bound SQL parameter, never
+string-concatenated into anything.
+
+`search_trips` is `security invoker` (the default for `language sql` functions, stated
+explicitly anyway), `set search_path = ''`, revoked from `public` and `anon`, granted
+only to `authenticated`. Because it runs as the calling role and reads from
+`public.trips`, `trips_select_own` applies exactly as it would to a direct `select` —
+the function grants no visibility beyond what RLS already allows that caller. Verified
+directly (`unit-tests/integration/trips.test.ts`): an anonymous client calling the RPC
+gets `42501` (`permission denied for function search_trips`); a signed-in user never
+sees another user's rows through it.
+
+`%` and `_` (SQL `LIKE` wildcards) are escaped to be matched **literally** inside the
+function (`replace(..., '%', '\%')` / `'_', '\_'` with `escape '\'`), since this is
+user-typed search text, not a pattern the user intends to author — confirmed by test:
+searching `%` alone returns zero results rather than every row. `left(btrim(p_search),
+200)` bounds the term length before it's ever used in a pattern.
+
+Sorting is fixed inside the same function (ongoing → upcoming → planning → completed as
+groups, ascending `start_date` within every group except `completed`, which sorts
+descending) — the client cannot choose an arbitrary `order by` expression, and the rule
+lives in exactly one place in SQL, never duplicated in TypeScript.
+
+### `status` cannot be written — verified, not assumed
+
+An earlier draft of the Phase 6 plan claimed PostgREST "ignores" an unknown column like
+`status` in an insert/update payload. That was wrong and is corrected here: `status` is
+not a column of `trips` at all (it only exists on the `trips_with_status` view, computed
+by `compute_trip_status()`), and PostgREST **rejects** the whole request when the
+payload references it. Verified empirically against the local instance, both via `curl`
+with a real signed-in access token and via `unit-tests/integration/trips.test.ts`:
+
+```
+POST /rest/v1/trips  { ..., "status": "completed" }
+→ 400 Bad Request, code PGRST204
+  "Could not find the 'status' column of 'trips' in the schema cache"
+```
+
+No row is created (verified by a follow-up select). The identical rejection happens on
+`PATCH` with `status` in the body, and the target row is confirmed unchanged. An
+`owner_id` pointed at a different user is rejected differently — `42501`, an RLS
+`with check` violation on `trips_insert_own` — since `owner_id` is a real column; the
+column default (`default auth.uid()`) is what supplies it, and
+`features/trips/actions.ts` never includes `owner_id` in the objects it sends to
+`.insert()`/`.update()` at all.
+
+`features/trips/schemas.ts`'s `tripFormSchema` uses `z.strictObject(...)`, so a payload
+carrying an unrecognized key (`status`, `owner_id`, `id`, ...) fails validation with a
+reported error rather than the extra key being silently dropped. This is defense in
+depth, not the only thing preventing it: `createTrip`/`updateTrip` in
+`features/trips/actions.ts` build the object sent to Supabase field-by-field from an
+explicit allowlist (`name`, `destination`, `description`, `start_date`, `end_date`) —
+`parsed.data` is never spread directly into `.insert()`/`.update()`, so even a schema
+change later couldn't silently widen what's writable.
+
+### Civil dates: format-valid is not the same as calendar-valid
+
+`lib/dates/civil-date.ts`'s `isValidCivilDate()` goes beyond the `YYYY-MM-DD` regex
+(which alone would accept `2026-02-30`, `2026-13-10`, `2026-00-00`, etc.): it uses
+`Date.UTC(year, month - 1, day)` purely as scratch arithmetic to detect
+overflow/underflow (e.g. `Date.UTC` normalizes April 31 into May 1), then compares the
+UTC year/month/day read back out to what was passed in. Only `getUTC*` accessors are
+used, never the local-timezone `getMonth()`/`getDate()` variants, and the function never
+returns a `Date` — the string is the value everywhere else in the app, end to end
+(`tripFormSchema`, the insert/update payload, the Postgres `date` column, and back out
+through `trips_with_status`). `end_date >= start_date` is a plain string comparison,
+which is chronologically correct for `YYYY-MM-DD` strings without ever constructing a
+`Date`. Verified round-trip with no shift:
+`unit-tests/integration/trips.test.ts` writes `2026-01-01`/`2026-12-31` and reads back
+the identical strings.
+
+### Ownership and "not found" are indistinguishable, on purpose
+
+`features/trips/queries.ts`'s `getTripById()` returns `null` for three different
+underlying situations — a malformed UUID (caught by `uuidSchema` before any query is
+made), a well-formed UUID that doesn't exist, and a well-formed UUID belonging to
+another user (silently filtered out by `trips_select_own`'s RLS `using` clause, not an
+error) — and the calling page always responds the same way: `notFound()`, rendering
+`app/dashboard/not-found.tsx`, which never includes the requested id in its message.
+Verified directly against the DB layer that a malformed UUID reaching PostgREST
+_without_ the app's pre-validation is a `400`, not a clean empty result — which is
+exactly why `queries.ts` validates before querying, rather than relying on the DB to
+produce an equivalent outcome on its own.
+
+The same "0 rows affected, same generic failure either way" rule applies to
+`updateTrip`/`deleteTrip` in `features/trips/actions.ts`: a `.update()`/`.delete()`
+matching zero rows (wrong id, or someone else's trip) is treated identically to any
+other operational failure — same message, same log category — so neither tells a caller
+which of the two happened.
+
+### Session checks independent of `proxy.ts` / `app/dashboard/layout.tsx`
+
+`lib/trips/auth.ts` adds a third, independent session check inside every query and every
+Server Action, split by what the caller is doing rather than folded into one generic
+"auth failed" path:
+
+- `requireSupabaseForRead(pathname)` (queries, i.e. Server Components): no session is a
+  navigation, not an inline error — `redirect(buildLoginRedirectUrl(pathname))`, the
+  same outcome the two earlier layers would already have produced in the normal case.
+  Reusing this call's own Supabase client for the actual data query avoids a second
+  `getClaims()` round trip per read.
+- `getSupabaseForMutation()` (Server Actions): no session is reported back to the form
+  like any other actionable result (`SESSION_EXPIRED_ERROR`), never a hard redirect
+  mid-submission, and deliberately **not** the same message/log category as a generic
+  database failure — a routine session expiry during submission should read as exactly
+  that, not as "something went wrong."
+
+### Delete: dialog stays open on failure
+
+`features/trips/components/delete-trip-dialog.tsx` calls `deleteTrip()` inside
+`useTransition()`. Nothing in the dialog closes it on failure — `AlertDialogAction` (the
+confirm button) is a plain button, not wrapped in the Base UI `Close` primitive the way
+`AlertDialogCancel` is — so an error result only sets local `error` state, which renders
+inside the still-open dialog as `role="alert"` (a live region, announced without a
+manual `.focus()` call — the same pattern `login-form.tsx`/`signup-form.tsx` already
+use). Both buttons are disabled for the duration of the transition, which is also what
+prevents a duplicate submission from a second click.
+
+### Success messages: exact known values only, param stripped after showing
+
+`features/trips/components/trip-success-message.tsx` reads `?criado=1` / `?editado=1` /
+`?excluido=1`, looks the matched key up in a fixed table of three hard-coded strings
+(never reflecting the URL's actual text), renders it in `role="status"`, then removes
+**only that one param** via `router.replace()` — every other param (`q`, `status`, ...)
+is preserved untouched, and no full page refresh occurs. The matched key is captured
+once via `useState`'s lazy initializer (evaluated during the first render) rather than
+re-derived from `searchParams` on every render, specifically so the message stays
+visible after the replace: a plain reactive derivation would make it disappear the
+instant the URL changes. The effect itself never calls `setState` — it only performs the
+`router.replace()` navigation, which is what the effect is for.
+
+### Docker, `secure` cookies, and testing on `localhost`
+
+The Docker image runs with `NODE_ENV=production`, so
+`lib/supabase/env.ts`'s `getSupabaseCookieOptions()` sets `secure: true` there. Tested
+directly against the running production container (`itrip_mvp-app-1`) accessed at
+`http://localhost:3002` (the host-side port — see `docker-compose.yml`'s `3002:3000`
+mapping and docs/local-environment.md; the container's own internal port is still 3000) — plain HTTP, no TLS — and confirmed by two independent sources rather than
+assumed:
+
+- W3C Secure Contexts §3.1 ("Is origin potentially trustworthy?"): `localhost` and the
+  loopback ranges `127.0.0.0/8` / `::1/128` are treated as potentially trustworthy even
+  without HTTPS.
+- MDN's `Set-Cookie` reference, on the `Secure` attribute: _"the `https:` requirements
+  are ignored when the `Secure` attribute is set by localhost."_
+
+The exemption is host-based (`localhost`/`127.0.0.1`/`::1`), not port-based, so it holds
+regardless of which port the container is published on. So a `Secure` cookie set by this
+project's own production container is accepted and sent normally by every modern browser
+when the app is reached via `http://localhost:3002` or `http://127.0.0.1:3002` — **this
+is not weakened for local testing**; the same `secure: true` production configuration is
+what's being exercised. The exemption does **not** extend to a LAN IP
+(`http://192.168.x.x:3002`) or any other non-HTTPS hostname — reaching the container that
+way would silently drop the session cookie and look like a broken login. Correct local
+testing of the production build is: always via `localhost` or `127.0.0.1`, never a LAN
+IP, and never treated as equivalent to how the app will actually be reached once deployed
+behind real HTTPS.
+
+### No pagination (documented MVP scope decision)
+
+`search_trips` returns the caller's full, filtered result set in one call. With the
+small per-user trip counts this project targets (single digits to low tens), this was a
+deliberate scope decision for the MVP rather than an oversight — the same simplification
+already made for other areas of this project. Revisiting it (offset/keyset pagination on
+the RPC) is future work if trip counts grow.
+
+### Itinerary field
+
+`trips.itinerary` (added in `supabase/migrations/20260912022738_add_trips_itinerary.sql`)
+is a plain, unstructured `text` column, capped at 10,000 characters by a named check
+constraint (`trips_itinerary_length`). Deliberately simple for this phase — no
+structured days/times/activities, no drag-and-drop, no maps, no rich text editor, no
+uploads, no AI generation; all explicitly deferred, not implemented as stubs.
+
+- **Normalization** follows exactly the same split already established for
+  `description`: the DB trigger (`normalize_trips()`) only trims; turning an
+  empty/whitespace-only value into `null` is an application-layer concern
+  (`features/trips/schemas.ts`'s `.transform()`), not a DB-layer one. `.trim()` only
+  touches the string's own leading/trailing edges — internal line breaks are untouched,
+  so a multi-line itinerary round-trips exactly as typed (verified in
+  `unit-tests/integration/trips.test.ts`, writing a 3-line string and reading it back
+  byte-for-byte).
+- **Never searched**: `search_trips` returns `itinerary` in its result rows but never
+  matches against it — only `name`/`destination` are searched, per the explicit scope
+  for this phase.
+- **RLS**: no new policy was needed — `itinerary` is just another column on `trips`,
+  governed by the same `trips_select_own`/`trips_update_own`/etc. policies as every
+  other column. Verified directly (not assumed): a cross-user `trips_with_status` select
+  including `itinerary` returns no row at all for another user's trip, and `search_trips`
+  called by a different user for the same search term returns zero rows.
+- **XSS-safe by construction, not by sanitization**: `features/trips/components/trip-itinerary.tsx`
+  interpolates `itinerary` as ordinary JSX text — never `dangerouslySetInnerHTML` — so
+  React's automatic escaping is what prevents anything HTML- or Markdown-looking the
+  user typed from ever being parsed or executed; it is always displayed as the literal
+  characters typed. `whitespace-pre-wrap` (CSS) is what preserves line breaks visually;
+  no markup (`<br>`) is generated for them. Verified in
+  `unit-tests/features/trips/components/trip-itinerary.test.tsx`: a `<script>`/`<img
+onerror>` payload renders as visible text and creates no actual `<script>`/`<img>`
+  DOM node.
+- **Write path**: identical allowlist discipline as every other trip field —
+  `features/trips/actions.ts`'s `createTrip`/`updateTrip` list `itinerary` explicitly in
+  the object sent to `.insert()`/`.update()`; `parsed.data` is never spread directly.
+  `tripFormSchema` remains `z.strictObject(...)`, so `status`/`owner_id`/any other
+  unrecognized key in a payload that also includes `itinerary` is still rejected exactly
+  as before — adding a field to the allowlist does not loosen what else is accepted.
+
+### Date locale: PT-BR text, and the native date input's own limitation
+
+Investigated after the app was seen showing a date as `09/14/2026` (US month-first
+order) rather than `14/09/2026`:
+
+- **Every date the app itself formats as text** (`lib/dates/civil-date.ts`'s
+  `formatCivilDateBR()`, used by trip cards and the trip detail page) was already
+  correct — confirmed by grepping the rendered HTML for `DD/MM/AAAA`-shaped strings,
+  which is all it ever produces: pure string slicing on the `YYYY-MM-DD` value, no
+  `Date`, no `Intl`/`toLocaleDateString()` anywhere in the codebase (grepped to confirm
+  zero matches for either outside `lib/dates/civil-date.ts`'s own internal validation
+  arithmetic and unrelated timestamp assertions in integration tests).
+- **The actual cause**: `app/layout.tsx` declared `<html lang="en">` on a
+  Portuguese-language application — a real bug, fixed to `lang="pt-BR"`. This matters
+  for accessibility (screen readers use `lang` to choose pronunciation rules)
+  independently of any date-formatting effect.
+- **Honest limitation, not hidden**: the `09/14/2026`-shaped text the user actually saw
+  is the **native** `<input type="date">` control's own rendering (in
+  `features/trips/components/trip-form.tsx`) — its displayed format (though never its
+  underlying `value`, which is always `YYYY-MM-DD` regardless of display) is controlled
+  by the browser using the browser/OS's own locale/regional settings, not reliably by
+  the page's `lang` attribute; behavior differs by browser and isn't something this
+  project's code can fully guarantee. `lang="pt-BR"` is still the correct, standards-
+  based signal to send and does influence some browsers, but is not a guaranteed fix for
+  every browser/OS combination. Per this phase's explicit instruction, the native input
+  was not replaced with a custom date picker to chase full control over this — that
+  trade-off (accessibility and platform-native behavior of a real `<input type="date">`
+  vs. exact cross-browser visual control) was made deliberately in favor of the native
+  control.

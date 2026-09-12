@@ -56,6 +56,21 @@ export async function signInAs(email: string): Promise<SupabaseClient> {
   return client;
 }
 
+/**
+ * A YYYY-MM-DD string `days` away from "today", computed the same way
+ * compute_trip_status() computes it in SQL — midnight UTC, not the machine's local
+ * timezone — so status-boundary tests stay correct regardless of where they run.
+ */
+export function civilDateOffsetFromTodayUTC(days: number): string {
+  const now = new Date();
+  const todayUtcMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  const target = new Date(todayUtcMs + days * 86_400_000);
+  const yyyy = target.getUTCFullYear();
+  const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(target.getUTCDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 export async function tripIdOwnedBy(email: string, name: string): Promise<string> {
   const admin = adminClient();
   const { data: user } = await admin.auth.admin.listUsers({ page: 1, perPage: 200 });

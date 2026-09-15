@@ -9,7 +9,9 @@ import { expect, test } from "@playwright/test";
 test("home page loads", async ({ page }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { level: 1, name: "iTrip" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Planeje hoje. Viaje melhor." }),
+  ).toBeVisible();
   await expect(page.getByRole("link", { name: "Criar conta" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Entrar" })).toBeVisible();
 });

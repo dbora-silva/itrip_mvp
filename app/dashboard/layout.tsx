@@ -4,6 +4,7 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { buildLoginRedirectUrl } from "@/lib/auth/redirect";
 import { signOut } from "@/features/auth/actions";
 import { Button } from "@/components/ui/button";
+import { Logo } from "@/components/logo";
 
 /**
  * Second layer of protection for the private area, independent of proxy.ts. Next.js
@@ -24,10 +25,14 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="flex min-h-dvh flex-col bg-muted/30">
-      <nav className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
+    <div className="flex min-h-dvh flex-col">
+      <nav className="sticky top-0 z-40 border-b border-border bg-card/95 backdrop-blur supports-backdrop-filter:bg-card/80">
         <div className="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
-          <Link href="/dashboard" className="text-lg font-semibold tracking-tight text-foreground">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
+          >
+            <Logo />
             iTrip
           </Link>
           <form action={signOut}>

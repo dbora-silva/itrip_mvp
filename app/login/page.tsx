@@ -1,11 +1,16 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { LoginForm } from "@/features/auth/components/login-form";
+import { Logo } from "@/components/logo";
 
 export default function LoginPage() {
   return (
     <main className="mx-auto flex w-full max-w-sm flex-1 flex-col justify-center gap-6 px-6 py-16">
-      <Link href="/" className="text-center text-lg font-semibold tracking-tight text-foreground">
+      <Link
+        href="/"
+        className="flex items-center gap-2 self-center text-lg font-semibold tracking-tight text-foreground"
+      >
+        <Logo />
         iTrip
       </Link>
 

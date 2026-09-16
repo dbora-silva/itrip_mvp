@@ -16,7 +16,7 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
   const { trips, filters } = await listTrips(rawFilters, "/dashboard");
 
   return (
-    <>
+    <div className="my-auto flex w-full flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Minhas viagens</h1>
@@ -35,6 +35,6 @@ export default async function DashboardPage({ searchParams }: DashboardPageProps
       <TripFilters filters={filters} />
 
       <TripList trips={trips} filters={filters} />
-    </>
+    </div>
   );
 }

@@ -1,8 +1,8 @@
-# iTrip
+# tripCanvas
 
 **Plan your trips. Ship quality on top of them.**
 
-iTrip is a full-stack travel planning MVP built as the target application for a
+tripCanvas is a full-stack travel planning MVP built as the target application for a
 hands-on Quality Engineering portfolio. It lets people sign up, manage their trips,
 and keep a simple itinerary — and it exists so that authentication, business rules,
 data ownership, and UI flows can be tested the way a real product would be.
@@ -19,21 +19,21 @@ data ownership, and UI flows can be tested the way a real product would be.
 
 **Landing page**
 
-![iTrip landing page](docs/screenshots/landing-page.png)
+![tripCanvas landing page](docs/screenshots/landing-page.png)
 
 **Authenticated dashboard**
 
-![iTrip dashboard](docs/screenshots/dashboard.png)
+![tripCanvas dashboard](docs/screenshots/dashboard.png)
 
 ## About the project
 
 Trip planning tends to end up scattered across notes apps, spreadsheets, and chat
 threads: destinations, dates, and the small tasks around a trip rarely live in one
-place. iTrip gives that a single, structured home — sign up, create a trip with its
+place. tripCanvas gives that a single, structured home — sign up, create a trip with its
 destination and dates, write a free-form itinerary, and find it later by name,
 destination, or status.
 
-This is not a repository of tests bolted onto a toy app. iTrip was built with real
+This is not a repository of tests bolted onto a toy app. tripCanvas was built with real
 constraints on purpose: authenticated routes, server-side authorization checks,
 row-level data ownership in PostgreSQL, input validation, and generic error
 responses that don't leak internal state. Those are the boundaries a Quality

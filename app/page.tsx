@@ -59,7 +59,7 @@ export default function Home() {
         </section>
 
         <section
-          aria-label="Benefícios do iTrip"
+          aria-label="Benefícios do tripCanvas"
           className="flex flex-1 flex-col justify-center border-t border-border"
         >
           <div className="mx-auto grid w-full max-w-5xl grid-cols-1 gap-4 px-4 py-12 sm:grid-cols-3 sm:px-6 lg:px-8">
@@ -78,7 +78,7 @@ export default function Home() {
 
       <footer className="border-t border-border">
         <p className="mx-auto w-full max-w-5xl px-4 py-6 text-center text-sm text-muted-foreground sm:px-6 lg:px-8">
-          <span className="font-medium text-foreground">iTrip</span> · Organize suas viagens em um
+          <span className="font-medium text-foreground">tripCanvas</span> · Organize suas viagens em um
           só lugar.
         </p>
       </footer>

@@ -11,7 +11,7 @@ export function SiteHeader() {
           className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
         >
           <Logo />
-          iTrip
+          tripCanvas
         </Link>
 
         <nav aria-label="Autenticação" className="flex items-center gap-2">

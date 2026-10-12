@@ -33,7 +33,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
             className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground"
           >
             <Logo />
-            iTrip
+            tripCanvas
           </Link>
           <form action={signOut}>
             <Button type="submit" variant="outline" size="sm">

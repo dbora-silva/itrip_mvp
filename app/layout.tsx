@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "iTrip",
+  title: "tripCanvas",
   description: "Organize suas viagens em um só lugar.",
 };
 
